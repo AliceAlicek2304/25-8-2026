@@ -37,7 +37,7 @@ class LetterEngine {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.seedRain();
 
-    if (this.phase === 'reveal' && this.sceneIndex >= 0) {
+    if ((this.phase === 'reveal' || this.phase === 'last') && this.sceneIndex >= 0) {
       const elapsed = performance.now() - this.sceneStartedAt;
       this.createTextParticles(this.config.revealTexts[this.sceneIndex]);
       this.sceneStartedAt = performance.now() - elapsed;
@@ -52,13 +52,13 @@ class LetterEngine {
   };
 
   seedRain() {
-    this.rainFontSize = clamp(Math.round(this.width / 32), 11, 17);
+    this.rainFontSize = clamp(Math.round(this.width / 44), 10, 15);
     const columns = Math.ceil(this.width / this.rainFontSize);
     this.rain = Array.from({ length: columns }, (_, index) => ({
       x: index * this.rainFontSize,
       y: Math.random() * this.height,
-      speed: this.reduceMotion ? 0 : 0.55 + Math.random() * 1.55,
-      length: 4 + Math.floor(Math.random() * 11),
+      speed: this.reduceMotion ? 0 : 0.7 + Math.random() * 1.7,
+      length: 8 + Math.floor(Math.random() * 11),
       offset: Math.floor(Math.random() * CHARACTERS.length),
     }));
   }
@@ -76,14 +76,12 @@ class LetterEngine {
 
   startReveal(index) {
     if (index >= this.config.revealTexts.length) {
-      this.particles = [];
-      this.setPhase('final');
       return;
     }
 
     this.sceneIndex = index;
     this.createTextParticles(this.config.revealTexts[index]);
-    this.setPhase('reveal');
+    this.setPhase(index === this.config.revealTexts.length - 1 ? 'last' : 'reveal');
   }
 
   createTextParticles(text) {
@@ -187,18 +185,16 @@ class LetterEngine {
   }
 
   drawRain(delta) {
-    const density = this.phase === 'final' ? 0.34 : 1;
     this.ctx.font = `${this.rainFontSize}px ui-monospace, SFMono-Regular, Consolas, monospace`;
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
 
     this.rain.forEach((drop, columnIndex) => {
       for (let trail = 0; trail < drop.length; trail += 1) {
-        if (Math.random() > density) continue;
         const y = drop.y - trail * this.rainFontSize;
         if (y < -this.rainFontSize || y > this.height + this.rainFontSize) continue;
         const strength = 1 - trail / drop.length;
-        const alpha = (this.phase === 'final' ? 0.11 : 0.12 + strength * 0.34);
+        const alpha = 0.13 + strength * 0.36;
         this.ctx.fillStyle = trail === 0
           ? `rgba(245, 241, 255, ${alpha + 0.18})`
           : `rgba(170, 139, 255, ${alpha})`;
@@ -212,7 +208,7 @@ class LetterEngine {
       drop.y += drop.speed * delta * this.rainFontSize * 0.12;
       if (drop.y - drop.length * this.rainFontSize > this.height) {
         drop.y = -Math.random() * this.height * 0.55;
-        drop.speed = this.reduceMotion ? 0 : 0.55 + Math.random() * 1.55;
+        drop.speed = this.reduceMotion ? 0 : 0.7 + Math.random() * 1.7;
       }
     });
   }
@@ -245,8 +241,9 @@ class LetterEngine {
   }
 
   drawTextParticles(elapsed, delta) {
+    const isLastText = this.sceneIndex === this.config.revealTexts.length - 1;
     const gatherDuration = this.reduceMotion ? 400 : 1550;
-    const holdDuration = this.reduceMotion ? 2200 : 1950;
+    const holdDuration = isLastText ? Number.POSITIVE_INFINITY : this.reduceMotion ? 2200 : 1950;
     const dissolveDuration = this.reduceMotion ? 400 : 1100;
     const dissolveAt = gatherDuration + holdDuration;
 
@@ -285,7 +282,7 @@ class LetterEngine {
       this.ctx.fillRect(0, scanY, this.width, 1);
     }
 
-    if (elapsed >= dissolveAt + dissolveDuration) {
+    if (!isLastText && elapsed >= dissolveAt + dissolveDuration) {
       this.startReveal(this.sceneIndex + 1);
     }
   }
@@ -333,7 +330,7 @@ class LetterEngine {
     if (this.phase === 'intro') {
       this.drawIntro(elapsed);
       if (elapsed >= 3900) this.startReveal(0);
-    } else if (this.phase === 'reveal') {
+    } else if (this.phase === 'reveal' || this.phase === 'last') {
       this.drawTextParticles(elapsed, delta);
     }
 
@@ -360,7 +357,6 @@ function App() {
   const engineRef = useRef(null);
   const audioRef = useRef(null);
   const [phase, setPhase] = useState('intro');
-  const [accepted, setAccepted] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
 
   useEffect(() => {
@@ -376,12 +372,6 @@ function App() {
       document.removeEventListener('visibilitychange', engine.setHidden);
     };
   }, []);
-
-  const handleFinalAnswer = (event) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    engineRef.current?.celebrate(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    setAccepted(true);
-  };
 
   const toggleAudio = async () => {
     if (!audioRef.current) return;
@@ -413,29 +403,9 @@ function App() {
         <span className="system-hud__status">{phase.toUpperCase()}</span>
       </header>
 
-      <p className={`tap-hint ${phase === 'final' ? 'tap-hint--hidden' : ''}`}>
+      <p className={`tap-hint ${phase === 'last' ? 'tap-hint--hidden' : ''}`}>
         CHẠM ĐỂ TUA NHANH
       </p>
-
-      <section className={`final-message ${phase === 'final' ? 'final-message--visible' : ''}`}>
-        <p className="final-message__eyebrow">{CONFIG.finalEyebrow}</p>
-        <h1>{accepted ? CONFIG.acceptedMessage : CONFIG.finalTitle}</h1>
-        {!accepted && (
-          <>
-            <p className="final-message__copy">{CONFIG.finalMessage}</p>
-            <p className="final-message__question">{CONFIG.finalQuestion}</p>
-            <button
-              className="answer-button"
-              type="button"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={handleFinalAnswer}
-            >
-              <span aria-hidden="true">♡</span>
-              {CONFIG.finalButton}
-            </button>
-          </>
-        )}
-      </section>
 
       {CONFIG.audioSrc && (
         <>
@@ -453,9 +423,7 @@ function App() {
       )}
 
       <p className="sr-only" aria-live="polite">
-        {phase === 'final'
-          ? `${CONFIG.finalTitle}. ${CONFIG.finalMessage} ${CONFIG.finalQuestion}`
-          : CONFIG.revealTexts[Math.max(0, engineRef.current?.sceneIndex ?? 0)]}
+        {CONFIG.revealTexts[Math.max(0, engineRef.current?.sceneIndex ?? 0)]}
       </p>
     </main>
   );
